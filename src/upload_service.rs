@@ -1,10 +1,16 @@
-use std::env;
+use std::{collections::HashMap, env, error::Error};
 
 use actix_easy_multipart::{File, FromMultipart};
+use actix_web::http;
 use dotenv::dotenv;
-use reqwest::blocking::{multipart, Client};
+use reqwest::{ Client};
+use serde::Serialize;
 
-fn cloudinary_helper(file_part: String) {
+use crate::models::{APIResponse, CldResponse, URLFile};
+
+trait UploadHelper {}
+
+async fn cloudinary_helper(file_part: String) -> Result<CldResponse, Box<dyn Error>> {
     //load data from env variable
     dotenv().ok();
     let cloud_name = match env::var("CLOUD_NAME") {
@@ -21,15 +27,32 @@ fn cloudinary_helper(file_part: String) {
         x = cloud_name
     );
 
-    //header
-    let form_data = multipart::Form::new()
-        .text("upload_preset", upload_preset)
-        .file("file", file_part)
-        .unwrap();
+    let mut map: HashMap<&str, &str> = HashMap::new();
+    map.insert("upload_preset", &upload_preset);
+    map.insert("file", &file_part);
 
     //making api request
     let client = Client::new();
-    let response = client.post(url).multipart(form_data).send().unwrap();
+
+    let resp2 = client
+    .post(&url)
+    .json(&map)
+    .send()
+    .await?;
+
+        
+    println!("{:#?}", resp2);
+
+    let response = client
+        .post(&url)
+        .json(&map)
+        .send()
+        .await?
+        .json::<CldResponse>()
+        .await?;
+    
+
+    Ok(response)
 }
 
 #[derive(FromMultipart)]
@@ -38,5 +61,23 @@ struct UploadFromFile {
 }
 
 impl UploadFromFile {
-    fn upload(&self) {}
+    // fn upload(&self, cld: &impl UploadHelper) {
+    //     // cld.cloudinary_helper("file_part".to_string())
+    // }
+}
+
+#[derive(Serialize)]
+pub struct UploadFromURL {}
+
+impl UploadFromURL {
+    pub async fn upload(&self, new_file: URLFile) -> Result<APIResponse, Box<dyn Error>> {
+        let cld_upload = cloudinary_helper(new_file.file_path).await?;
+
+        let json_data: APIResponse = APIResponse {
+            status: http::StatusCode::OK.as_u16(),
+            data: cld_upload,
+        };
+
+        Ok(json_data)
+    }
 }
